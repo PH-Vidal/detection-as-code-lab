@@ -1,0 +1,39 @@
+services:
+  attack-simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["simulate", "--scenario", "all", "--output", "/shared/logs"]
+    volumes:
+      - lab_shared:/shared
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  detection-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      attack-simulator:
+        condition: service_completed_successfully
+    command:
+      - "detect"
+      - "--logs"
+      - "/shared/logs"
+      - "--json-out"
+      - "/shared/alerts.json"
+      - "--markdown-out"
+      - "/shared/incident_triage.md"
+    volumes:
+      - lab_shared:/shared
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  lab_shared:

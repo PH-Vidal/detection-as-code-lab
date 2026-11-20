@@ -1,0 +1,36 @@
+title: SSH Brute Force Followed by Successful Login (Account Compromise)
+id: 1a2b3c4d-1002-4a02-9b02-000000000002
+status: stable
+description: Correlates multiple failed SSH login attempts followed by a successful authentication from the same source IP within 10 minutes, strongly indicating credential compromise.
+author: Pedro Henrique Vidal (PH-Vidal)
+date: 2026-11-20
+references:
+  - https://attack.mitre.org/techniques/T1110/
+  - https://attack.mitre.org/techniques/T1078/
+tags:
+  - attack.credential_access
+  - attack.initial_access
+  - attack.t1110
+  - attack.t1078
+logsource:
+  product: linux
+  service: sshd
+detection:
+  failed_attempts:
+    event.action: ssh_login_failed
+  successful_login:
+    event.action: ssh_login_success
+  correlation:
+    type: temporal_sequence
+    group_by: source.ip
+    timeframe: 10m
+    stages:
+      - ref: failed_attempts
+        min_count: 5
+      - ref: successful_login
+        min_count: 1
+  condition: correlation
+falsepositives:
+  - Legitimate administrator struggling with credentials before entering the right password (verify source IP and VPN status)
+level: critical
+playbook_id: PB-001

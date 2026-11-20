@@ -1,0 +1,24 @@
+title: SSH Brute Force Attack Detected
+id: 1a2b3c4d-1001-4a01-9b01-000000000001
+status: stable
+description: Detects multiple failed SSH authentication attempts from the same source IP within a short time window, indicating a potential brute force or password spraying attack.
+author: Pedro Henrique Vidal (PH-Vidal)
+date: 2026-11-20
+references:
+  - https://attack.mitre.org/techniques/T1110/001/
+tags:
+  - attack.credential_access
+  - attack.t1110.001
+logsource:
+  product: linux
+  service: sshd
+detection:
+  selection:
+    event.action: ssh_login_failed
+  timeframe: 5m
+  condition: selection | count() by source.ip >= 5
+falsepositives:
+  - Misconfigured automation scripts or CI runners with expired SSH keys
+  - Users repeatedly mistyping passwords from a shared NAT gateway
+level: high
+playbook_id: PB-001

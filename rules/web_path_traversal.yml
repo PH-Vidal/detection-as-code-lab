@@ -1,0 +1,28 @@
+title: Web Path Traversal and Local File Inclusion Attempt
+id: 1a2b3c4d-2002-4b02-9c02-000000000004
+status: stable
+description: Detects directory traversal sequences and attempts to read sensitive Linux/Windows files through web request parameters.
+author: Pedro Henrique Vidal (PH-Vidal)
+date: 2026-11-20
+references:
+  - https://attack.mitre.org/techniques/T1190/
+  - https://owasp.org/www-community/attacks/Path_Traversal
+tags:
+  - attack.initial_access
+  - attack.t1190
+logsource:
+  category: webserver
+detection:
+  selection:
+    url.original|contains:
+      - "../"
+      - "..%2f"
+      - "%2e%2e%2f"
+      - "..\\..\\"
+      - "/etc/passwd"
+      - "/etc/shadow"
+  condition: selection
+falsepositives:
+  - Broken frontend relative path links (rarely include /etc/passwd or encoded traversal)
+level: high
+playbook_id: PB-002

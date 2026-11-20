@@ -1,0 +1,32 @@
+title: Unauthorized Local Account Creation or Privilege Escalation via Sudoers
+id: 1a2b3c4d-3003-4c03-9d03-000000000008
+status: stable
+description: Detects creation of a new local Linux account or addition of a user to privileged groups (sudo/wheel/root) outside approved provisioning workflows.
+author: Pedro Henrique Vidal (PH-Vidal)
+date: 2026-11-20
+references:
+  - https://attack.mitre.org/techniques/T1136/001/
+  - https://attack.mitre.org/techniques/T1548/003/
+tags:
+  - attack.persistence
+  - attack.privilege_escalation
+  - attack.t1136.001
+  - attack.t1548.003
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection_useradd:
+    process.command_line|contains:
+      - "useradd "
+      - "adduser "
+      - "usermod -aG sudo"
+      - "usermod -aG wheel"
+      - "NOPASSWD: ALL"
+  filter_provisioning:
+    user.name: ansible_provisioner
+  condition: selection_useradd and not filter_provisioning
+falsepositives:
+  - Approved IT onboarding or manual server administration during change windows
+level: high
+playbook_id: PB-006

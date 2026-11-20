@@ -1,0 +1,102 @@
+name: CI - Detection-as-Code Pipeline
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-sast:
+    name: Lint (Ruff) & SAST (Bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install analysis tools
+        run: python -m pip install --upgrade pip ruff bandit
+
+      - name: Run Ruff linter
+        run: ruff check .
+
+      - name: Run Bandit SAST
+        run: bandit -r detection_engine simulator -ll -ii
+
+  detection-tests:
+    name: Sigma Validation & Detection Unit Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package and dev dependencies
+        run: python -m pip install --upgrade pip ".[dev]"
+
+      - name: Validate all Sigma rules
+        run: dac-lab validate-rules
+
+      - name: Run True Positive / True Negative detection unit tests
+        run: pytest --cov=detection_engine --cov=simulator --cov-report=term-missing
+
+      - name: Run end-to-end Purple Team lab simulation
+        run: dac-lab run-lab --scenario all --output-dir lab_output
+
+  trivy-fs-scan:
+    name: Secrets, Misconfig & Dependency Scan (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scanner
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+
+  docker-build-and-scan:
+    name: Container Build, Smoke Test & Trivy Scan
+    runs-on: ubuntu-latest
+    needs: [lint-and-sast, detection-tests]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build hardened Docker image
+        run: docker build -t detection-as-code-lab:ci .
+
+      - name: Verify non-root user and CLI smoke tests
+        run: |
+          docker run --rm --entrypoint id detection-as-code-lab:ci -u | grep -qx "10001"
+          docker run --rm detection-as-code-lab:ci --version
+          docker run --rm detection-as-code-lab:ci validate-rules
+          docker run --rm detection-as-code-lab:ci run-lab --scenario all --output-dir /app/lab_output
+
+      - name: Run Trivy container image scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: detection-as-code-lab:ci
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH

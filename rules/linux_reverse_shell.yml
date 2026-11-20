@@ -1,0 +1,33 @@
+title: Linux Reverse Shell or Suspicious Remote Script Execution
+id: 1a2b3c4d-3001-4c01-9d01-000000000006
+status: stable
+description: Detects common Linux reverse shell one-liners (/dev/tcp, nc -e, python socket shell) and piped remote script execution (curl/wget piped to bash/sh).
+author: Pedro Henrique Vidal (PH-Vidal)
+date: 2026-11-20
+references:
+  - https://attack.mitre.org/techniques/T1059/004/
+tags:
+  - attack.execution
+  - attack.t1059.004
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection_revshell:
+    process.command_line|contains:
+      - "/dev/tcp/"
+      - "nc -e /bin/"
+      - "ncat -e /bin/"
+      - "mkfifo /tmp/"
+      - "pty.spawn"
+  selection_pipe_exec:
+    process.command_line|re:
+      - "(?i)(curl|wget)\\s+.*\\|\\s*(ba)?sh"
+  filter_package_manager:
+    process.command_line|contains:
+      - "https://get.docker.com"
+  condition: (selection_revshell or selection_pipe_exec) and not filter_package_manager
+falsepositives:
+  - Legitimate administrative installer scripts piped directly to shell (discouraged in production)
+level: critical
+playbook_id: PB-004

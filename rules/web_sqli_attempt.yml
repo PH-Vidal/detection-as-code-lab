@@ -1,0 +1,28 @@
+title: Web Application SQL Injection Attempt
+id: 1a2b3c4d-2001-4b01-9c01-000000000003
+status: stable
+description: Detects common SQL Injection patterns (UNION SELECT, boolean tautologies, comment terminators) in HTTP request URLs.
+author: Pedro Henrique Vidal (PH-Vidal)
+date: 2026-11-20
+references:
+  - https://attack.mitre.org/techniques/T1190/
+  - https://owasp.org/www-community/attacks/SQL_Injection
+tags:
+  - attack.initial_access
+  - attack.t1190
+logsource:
+  category: webserver
+detection:
+  selection:
+    url.original|re:
+      - "(?i)(union(\\+|%20|\\s)+select)"
+      - "(?i)('|%27)(\\+|%20|\\s)*or(\\+|%20|\\s)*(('|%27)?1('|%27)?=('|%27)?1|1=1)"
+      - "(?i)(sleep\\(|benchmark\\(|waitfor(\\+|%20|\\s)+delay)"
+      - "(?i)(information_schema|pg_sleep)"
+  filter_healthcheck:
+    url.original|startswith: /health
+  condition: selection and not filter_healthcheck
+falsepositives:
+  - Authorized DAST / AppSec vulnerability scanners during scheduled testing windows
+level: high
+playbook_id: PB-002

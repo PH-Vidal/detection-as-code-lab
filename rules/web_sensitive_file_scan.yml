@@ -1,0 +1,29 @@
+title: Automated Reconnaissance of Sensitive Web Files
+id: 1a2b3c4d-2003-4b03-9c03-000000000005
+status: stable
+description: Detects repeated probing of sensitive configuration, version control, and backup files (such as .env, .git/config, backup.sql, wp-login.php) from a single source IP.
+author: Pedro Henrique Vidal (PH-Vidal)
+date: 2026-11-20
+references:
+  - https://attack.mitre.org/techniques/T1595/003/
+tags:
+  - attack.reconnaissance
+  - attack.t1595.003
+logsource:
+  category: webserver
+detection:
+  selection:
+    url.original|contains:
+      - "/.env"
+      - "/.git/config"
+      - "/.git/HEAD"
+      - "/wp-login.php"
+      - "/backup.sql"
+      - "/phpinfo.php"
+      - "/admin/config"
+  timeframe: 2m
+  condition: selection | count() by source.ip >= 3
+falsepositives:
+  - Authorized external attack surface management (ASM) scanners
+level: medium
+playbook_id: PB-003
