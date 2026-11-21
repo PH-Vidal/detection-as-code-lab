@@ -1,8 +1,8 @@
-"""Atomic-style controlled attack simulator generating synthetic SSH, Web, and Linux Audit logs.
+"""Atomic-style controlled attack simulator generating synthetic multi-domain SOC telemetry.
 
 Safety: This module ONLY writes synthetic log lines to disk. It never performs real
 network scans, exploitation, or host modifications. All public IPs belong to RFC 5737
-test ranges (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24).
+test ranges (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24) and domains use RFC 2606 `.example`.
 """
 
 from __future__ import annotations
@@ -11,7 +11,13 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-SCENARIOS = ("ssh_compromise", "web_attacks", "linux_post_exploit")
+SCENARIOS = (
+    "ssh_compromise",
+    "web_attacks",
+    "linux_post_exploit",
+    "cloud_iam_abuse",
+    "dns_c2_exfil",
+)
 
 
 def _fmt_syslog_ts(dt: datetime) -> str:
@@ -192,6 +198,151 @@ def build_linux_audit_logs(
     return [json.dumps(rec) for rec in records]
 
 
+def build_cloudtrail_logs(
+    base_time: datetime, *, include_attack: bool, include_benign: bool
+) -> list[str]:
+    """Generate synthetic AWS CloudTrail JSONL telemetry (benign IaC + IAM privesc / trail stop)."""
+    records: list[dict[str, object]] = []
+
+    if include_benign:
+        records.extend(
+            [
+                {
+                    "eventTime": (base_time + timedelta(seconds=15)).isoformat(),
+                    "eventSource": "ec2.amazonaws.com",
+                    "eventName": "DescribeInstances",
+                    "awsRegion": "us-east-1",
+                    "sourceIPAddress": "10.0.2.50",
+                    "userAgent": "aws-cli/2.17.0",
+                    "userIdentity": {"type": "IAMUser", "userName": "alice"},
+                    "requestParameters": {},
+                },
+                {
+                    "eventTime": (base_time + timedelta(seconds=28)).isoformat(),
+                    "eventSource": "iam.amazonaws.com",
+                    "eventName": "AttachUserPolicy",
+                    "awsRegion": "us-east-1",
+                    "sourceIPAddress": "10.0.2.60",
+                    "userAgent": "Terraform/1.9.0",
+                    "userIdentity": {"type": "IAMUser", "userName": "terraform-ci"},
+                    "requestParameters": {
+                        "userName": "app-deployer",
+                        "policyArn": "arn:aws:iam::aws:policy/PowerUserAccess",
+                    },
+                },
+                {
+                    "eventTime": (base_time + timedelta(seconds=42)).isoformat(),
+                    "eventSource": "cloudtrail.amazonaws.com",
+                    "eventName": "UpdateTrail",
+                    "awsRegion": "us-east-1",
+                    "sourceIPAddress": "10.0.2.90",
+                    "userAgent": "aws-cli/2.17.0",
+                    "userIdentity": {"type": "IAMUser", "userName": "secops-breakglass"},
+                    "requestParameters": {
+                        "name": "legacy-test-trail",
+                        "isMultiRegionTrail": False,
+                    },
+                },
+            ]
+        )
+
+    if include_attack:
+        cloud_attacker = "192.0.2.55"  # RFC 5737 test IP in local TI feed
+        records.extend(
+            [
+                {
+                    "eventTime": (base_time + timedelta(seconds=240)).isoformat(),
+                    "eventSource": "iam.amazonaws.com",
+                    "eventName": "AttachUserPolicy",
+                    "awsRegion": "us-east-1",
+                    "sourceIPAddress": cloud_attacker,
+                    "userAgent": "Boto3/1.35.0 Python/3.12",
+                    "userIdentity": {"type": "IAMUser", "userName": "compromised-dev"},
+                    "requestParameters": {
+                        "userName": "compromised-dev",
+                        "policyArn": "arn:aws:iam::aws:policy/AdministratorAccess",
+                    },
+                },
+                {
+                    "eventTime": (base_time + timedelta(seconds=255)).isoformat(),
+                    "eventSource": "iam.amazonaws.com",
+                    "eventName": "CreateAccessKey",
+                    "awsRegion": "us-east-1",
+                    "sourceIPAddress": cloud_attacker,
+                    "userAgent": "Boto3/1.35.0 Python/3.12",
+                    "userIdentity": {"type": "IAMUser", "userName": "compromised-dev"},
+                    "requestParameters": {"userName": "svc_backup_tmp"},
+                },
+                {
+                    "eventTime": (base_time + timedelta(seconds=275)).isoformat(),
+                    "eventSource": "cloudtrail.amazonaws.com",
+                    "eventName": "StopLogging",
+                    "awsRegion": "us-east-1",
+                    "sourceIPAddress": cloud_attacker,
+                    "userAgent": "Boto3/1.35.0 Python/3.12",
+                    "userIdentity": {"type": "IAMUser", "userName": "compromised-dev"},
+                    "requestParameters": {"name": "prod-org-trail"},
+                },
+            ]
+        )
+
+    return [json.dumps(rec) for rec in records]
+
+
+def build_dns_logs(
+    base_time: datetime, *, include_attack: bool, include_benign: bool
+) -> list[str]:
+    """Generate synthetic DNS query JSONL telemetry (normal traffic + DNS tunneling exfil burst)."""
+    records: list[dict[str, object]] = []
+
+    if include_benign:
+        benign_queries = [
+            (8, "10.0.1.15", "api.github.com", "A"),
+            (19, "10.0.1.22", "s3.us-east-1.amazonaws.com", "A"),
+            (
+                32,
+                "10.0.2.30",
+                "selector20261120longkeyhashabcdef._domainkey.corp.example",
+                "TXT",
+            ),
+            (48, "10.0.5.12", "status.python.org", "AAAA"),
+        ]
+        for offset, src_ip, qname, qtype in benign_queries:
+            records.append(
+                {
+                    "timestamp": (base_time + timedelta(seconds=offset)).isoformat(),
+                    "host": "dns-resolver-01",
+                    "source_ip": src_ip,
+                    "query": qname,
+                    "qtype": qtype,
+                    "rcode": "NOERROR",
+                }
+            )
+
+    if include_attack:
+        # Links back to attacker campaign 198.51.100.77 for cross-source kill-chain correlation
+        chunks = [
+            "4a9f8c2d7e6b1a0f3c5d8e9a7b2c4d6e",
+            "9f1e2d3c4b5a69788796a5b4c3d2e1f0",
+            "7c8d9e0f1a2b3c4d5e6f708192a3b4c5",
+            "2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e",
+            "e1f2a3b4c5d6e7f8091a2b3c4d5e6f7a",
+        ]
+        for idx, chunk in enumerate(chunks):
+            records.append(
+                {
+                    "timestamp": (base_time + timedelta(seconds=220 + idx * 6)).isoformat(),
+                    "host": "dns-resolver-01",
+                    "source_ip": "198.51.100.77",
+                    "query": f"{chunk}.exfil.tunnel-lab.example",
+                    "qtype": "TXT",
+                    "rcode": "NOERROR",
+                }
+            )
+
+    return [json.dumps(rec) for rec in records]
+
+
 def generate_lab_logs(
     output_dir: str | Path,
     *,
@@ -199,7 +350,7 @@ def generate_lab_logs(
     include_benign: bool = True,
     base_time: datetime | None = None,
 ) -> dict[str, Path]:
-    """Write synthetic SSH, Web, and Linux Audit logs into `output_dir`."""
+    """Write synthetic SSH, Web, Linux Audit, AWS CloudTrail, and DNS logs into `output_dir`."""
     if scenario != "all" and scenario not in SCENARIOS:
         raise ValueError(f"Unknown scenario: {scenario!r}. Choose 'all' or one of {SCENARIOS}.")
 
@@ -222,13 +373,28 @@ def generate_lab_logs(
         include_attack=scenario in {"all", "linux_post_exploit"},
         include_benign=include_benign,
     )
+    cloudtrail_lines = build_cloudtrail_logs(
+        start,
+        include_attack=scenario in {"all", "cloud_iam_abuse"},
+        include_benign=include_benign,
+    )
+    dns_lines = build_dns_logs(
+        start,
+        include_attack=scenario in {"all", "dns_c2_exfil"},
+        include_benign=include_benign,
+    )
 
-    ssh_path = out / "auth.log"
-    web_path = out / "access.log"
-    audit_path = out / "linux_audit.jsonl"
+    outputs = {
+        "sshd": (out / "auth.log", ssh_lines),
+        "webserver": (out / "access.log", web_lines),
+        "linux_audit": (out / "linux_audit.jsonl", audit_lines),
+        "aws_cloudtrail": (out / "cloudtrail.jsonl", cloudtrail_lines),
+        "dns": (out / "dns_queries.jsonl", dns_lines),
+    }
 
-    ssh_path.write_text("\n".join(ssh_lines) + ("\n" if ssh_lines else ""), encoding="utf-8")
-    web_path.write_text("\n".join(web_lines) + ("\n" if web_lines else ""), encoding="utf-8")
-    audit_path.write_text("\n".join(audit_lines) + ("\n" if audit_lines else ""), encoding="utf-8")
+    written: dict[str, Path] = {}
+    for key, (path, lines) in outputs.items():
+        path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        written[key] = path
 
-    return {"sshd": ssh_path, "webserver": web_path, "linux_audit": audit_path}
+    return written

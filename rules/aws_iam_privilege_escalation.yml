@@ -1,0 +1,46 @@
+title: AWS IAM Privilege Escalation or Unauthorized Access Key Creation
+id: 1a2b3c4d-4001-4d01-9e01-000000000009
+status: stable
+description: Detects high-risk AWS IAM privilege escalation actions (AttachUserPolicy with AdministratorAccess, PutUserPolicy, CreateAccessKey, or adding users to admin groups) outside approved IaC automation accounts.
+author: Pedro Henrique Vidal (PH-Vidal)
+date: 2026-11-20
+references:
+  - https://attack.mitre.org/techniques/T1098/001/
+  - https://attack.mitre.org/techniques/T1098/003/
+tags:
+  - attack.persistence
+  - attack.privilege_escalation
+  - attack.t1098.001
+  - attack.t1098.003
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection_policy_privesc:
+    event.action:
+      - AttachUserPolicy
+      - PutUserPolicy
+      - AttachRolePolicy
+    aws.cloudtrail.request_parameters|contains:
+      - AdministratorAccess
+      - PowerUserAccess
+      - IAMFullAccess
+      - Allow
+  selection_key_persistence:
+    event.action:
+      - CreateAccessKey
+      - AddUserToGroup
+    aws.cloudtrail.request_parameters|contains:
+      - admin
+      - prod
+      - root
+      - svc_backup_tmp
+  filter_iac_automation:
+    user.name:
+      - terraform-ci
+      - iac-deployer
+  condition: (selection_policy_privesc or selection_key_persistence) and not filter_iac_automation
+falsepositives:
+  - Approved break-glass IAM changes performed manually outside Terraform/IaC pipelines
+level: high
+playbook_id: PB-007

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "detection-as-code-lab"
-version = "1.0.0"
+version = "2.0.0"
 description = "Detection-as-Code & Purple Team SOC Lab with Sigma rules, log normalization, correlation, IOC enrichment, and NIST SP 800-61 reporting."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -58,6 +58,7 @@ select = ["E", "F", "I", "UP", "B", "S"]
 ignore = ["S101"]
 
 [tool.ruff.lint.per-file-ignores]
+"detection_engine/dashboard.py" = ["E501"]
 "tests/*" = ["S105", "S106", "S108"]
 
 [tool.pytest.ini_options]

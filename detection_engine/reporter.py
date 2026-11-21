@@ -13,21 +13,36 @@ ALLOWED_DISCORD_HOSTS = {"discord.com", "discordapp.com", "ptb.discord.com", "ca
 
 
 def format_terminal_report(report: DetectionReport) -> str:
-    """Render a concise SOC console summary of detection findings."""
+    """Render a concise SOC console summary of correlated incidents and detection findings."""
     sev = report.severity_counts()
     lines = [
         "=" * 78,
-        " DETECTION-AS-CODE LAB — SOC ALERT SUMMARY",
+        " DETECTION-AS-CODE LAB — SOC ALERT & INCIDENT SUMMARY",
         "=" * 78,
         f" Generated At    : {report.generated_at}",
         f" Rules Loaded    : {report.rules_loaded}",
         f" Events Parsed   : {report.events_processed}",
+        f" Incidents       : {len(report.incidents)} correlated campaign(s)",
         f" Alerts Triggered: {len(report.alerts)} "
         f"(CRITICAL={sev['critical']} | HIGH={sev['high']} | "
         f"MEDIUM={sev['medium']} | LOW={sev['low']})",
         f" MITRE ATT&CK    : {', '.join(report.mitre_summary()) or 'None'}",
         "-" * 78,
     ]
+
+    if report.incidents:
+        lines.append(" CORRELATED KILL-CHAIN INCIDENTS:")
+        for inc in report.incidents:
+            chain = " -> ".join(inc.kill_chain_stages) or "N/A"
+            lines.extend(
+                [
+                    f"  * [{inc.severity.upper()}] {inc.incident_id} | Entity: {inc.entity} "
+                    f"| Risk: {inc.risk_score}/100 | Alerts: {len(inc.alert_ids)}",
+                    f"    Kill Chain: {chain}",
+                    f"    Playbooks : {', '.join(inc.playbooks) or 'N/A'}",
+                ]
+            )
+        lines.append("-" * 78)
 
     if not report.alerts:
         lines.append(" [OK] No security alerts triggered. Telemetry appears benign.")
@@ -69,17 +84,42 @@ def format_markdown_report(report: DetectionReport) -> str:
         f"- **Generated At (UTC):** `{report.generated_at}`",
         f"- **Sigma Rules Evaluated:** `{report.rules_loaded}`",
         f"- **Normalized Events Processed:** `{report.events_processed}`",
+        f"- **Correlated Incidents:** `{len(report.incidents)}`",
         f"- **Total Alerts:** `{len(report.alerts)}` "
         f"(Critical: `{sev['critical']}`, High: `{sev['high']}`, "
         f"Medium: `{sev['medium']}`, Low: `{sev['low']}`)",
         f"- **MITRE ATT&CK Techniques Observed:** "
         f"{', '.join(f'`{t}`' for t in report.mitre_summary()) or 'None'}",
         "",
-        "## Executive Summary (NIST SP 800-61 — Detection & Analysis)",
-        "",
-        "| Alert ID | Severity | Rule Title | Entity | Events | MITRE ATT&CK | Playbook |",
-        "| :--- | :--- | :--- | :--- | :---: | :--- | :--- |",
     ]
+
+    if report.incidents:
+        lines.extend(
+            [
+                "## Correlated Kill-Chain Incidents",
+                "",
+                "| Incident ID | Severity | Risk Score | Entity | Alerts "
+                "| Kill-Chain Progression | Playbooks |",
+                "| :--- | :--- | :---: | :--- | :---: | :--- | :--- |",
+            ]
+        )
+        for inc in report.incidents:
+            chain = " → ".join(inc.kill_chain_stages) or "N/A"
+            pbs = ", ".join(inc.playbooks) or "N/A"
+            lines.append(
+                f"| `{inc.incident_id}` | **{inc.severity.upper()}** | `{inc.risk_score}/100` | "
+                f"`{inc.entity}` | {len(inc.alert_ids)} | {chain} | `{pbs}` |"
+            )
+        lines.append("")
+
+    lines.extend(
+        [
+            "## Executive Summary (NIST SP 800-61 — Detection & Analysis)",
+            "",
+            "| Alert ID | Severity | Rule Title | Entity | Events | MITRE ATT&CK | Playbook |",
+            "| :--- | :--- | :--- | :--- | :---: | :--- | :--- |",
+        ]
+    )
 
     for alert in report.alerts:
         mitre = ", ".join(alert.mitre_techniques) or "N/A"
@@ -157,7 +197,10 @@ def send_discord_alert(report: DetectionReport, webhook_url: str, *, timeout: in
         "username": "Detection-as-Code SOC Bot",
         "embeds": [
             {
-                "title": f"SOC Detection Summary ({len(report.alerts)} alerts)",
+                "title": (
+                    f"SOC Detection Summary ({len(report.alerts)} alerts / "
+                    f"{len(report.incidents)} incidents)"
+                ),
                 "color": 15158332 if (sev["critical"] or sev["high"]) else 3066993,
                 "description": top_alerts[:1800],
                 "fields": [
@@ -181,7 +224,7 @@ def send_discord_alert(report: DetectionReport, webhook_url: str, *, timeout: in
             "POST",
             path,
             body=body,
-            headers={"Content-Type": "application/json", "User-Agent": "detection-as-code-lab/1.0"},
+            headers={"Content-Type": "application/json", "User-Agent": "detection-as-code-lab/2.0"},
         )
         response = conn.getresponse()
         response.read()

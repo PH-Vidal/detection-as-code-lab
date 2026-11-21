@@ -1,4 +1,4 @@
-"""Core data models for normalized events, Sigma rules, enriched IOCs, and alerts."""
+"""Core data models for normalized events, Sigma rules, enriched IOCs, alerts, and incidents."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ class NormalizedEvent:
     """ECS-inspired normalized telemetry event."""
 
     timestamp: datetime
-    source_type: str  # "sshd", "webserver", "linux_audit"
+    source_type: str  # "sshd", "webserver", "linux_audit", "aws_cloudtrail", "dns"
     logsource: dict[str, str]
     fields: dict[str, Any]
     raw: str
@@ -134,6 +134,29 @@ class Alert:
 
 
 @dataclass(slots=True)
+class CorrelatedIncident:
+    """Cross-source correlated security incident linking related alerts into an attack chain."""
+
+    incident_id: str
+    entity: str
+    severity: str
+    risk_score: int
+    first_seen: str
+    last_seen: str
+    alert_ids: list[str]
+    rule_titles: list[str]
+    kill_chain_stages: list[str]
+    mitre_techniques: list[str]
+    mitre_tactics: list[str]
+    malicious_iocs: list[str]
+    playbooks: list[str]
+    summary: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
 class DetectionReport:
     """Complete output of a detection run."""
 
@@ -142,6 +165,7 @@ class DetectionReport:
     events_processed: int
     alerts: list[Alert]
     log_files: list[str] = field(default_factory=list)
+    incidents: list[CorrelatedIncident] = field(default_factory=list)
 
     def severity_counts(self) -> dict[str, int]:
         counts = {lvl: 0 for lvl in reversed(SEVERITY_ORDER)}
@@ -162,8 +186,10 @@ class DetectionReport:
             "rules_loaded": self.rules_loaded,
             "events_processed": self.events_processed,
             "total_alerts": len(self.alerts),
+            "total_incidents": len(self.incidents),
             "severity_counts": self.severity_counts(),
             "mitre_techniques_observed": self.mitre_summary(),
             "log_files": self.log_files,
+            "incidents": [inc.to_dict() for inc in self.incidents],
             "alerts": [alert.to_dict() for alert in self.alerts],
         }

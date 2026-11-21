@@ -279,9 +279,16 @@ def _collect_matched_fields(events: list[NormalizedEvent]) -> dict[str, Any]:
         "source.ip",
         "user.name",
         "host.name",
+        "event.action",
         "url.original",
         "process.name",
         "process.command_line",
+        "dns.question.name",
+        "dns.question.type",
+        "cloud.service.name",
+        "aws.cloudtrail.policy_arn",
+        "aws.cloudtrail.target_user",
+        "aws.cloudtrail.trail_name",
     ):
         values: list[str] = []
         for evt in events:

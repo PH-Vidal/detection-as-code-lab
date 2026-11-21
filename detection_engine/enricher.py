@@ -69,6 +69,10 @@ class IOCEnricher:
             ips.add(ip_val)
         for user_val in _collect_field(alert.matched_fields.get("user.name")):
             users.add(user_val)
+        for target_user in _collect_field(alert.matched_fields.get("aws.cloudtrail.target_user")):
+            users.add(target_user)
+        for dns_val in _collect_field(alert.matched_fields.get("dns.question.name")):
+            domains.add(dns_val.lower())
 
         # Also extract embedded IPs/domains from command lines or evidence (e.g., C2 callback IP)
         text_blobs = [
@@ -90,6 +94,13 @@ class IOCEnricher:
                     users.add(sus_user)
 
         return ips, users, domains
+
+    def _match_suspicious_domain(self, domain: str) -> str | None:
+        normalized = domain.lower().rstrip(".")
+        for bad in self.suspicious_domains:
+            if normalized == bad or normalized.endswith(f".{bad}"):
+                return bad
+        return None
 
     def enrich_alert(self, alert: Alert) -> Alert:
         """Enrich an alert in-place with IOC intelligence and escalate severity if malicious."""
@@ -143,22 +154,25 @@ class IOCEnricher:
                 )
                 notes.append(f"TI match ({self.feed_name}): suspicious account '{user}' observed.")
 
+        seen_bad_domains: set[str] = set()
         for domain in sorted(domains):
-            if domain in self.suspicious_domains:
+            matched_bad = self._match_suspicious_domain(domain)
+            if matched_bad and matched_bad not in seen_bad_domains:
+                seen_bad_domains.add(matched_bad)
                 should_escalate = True
                 enriched.append(
                     EnrichedIOC(
-                        value=domain,
+                        value=matched_bad,
                         ioc_type="domain",
                         classification="domain",
                         is_malicious=True,
                         threat_category="malicious_domain",
                         confidence="high",
-                        tags=["c2", "dropper"],
+                        tags=["c2", "dropper", "exfiltration"],
                     )
                 )
                 notes.append(
-                    f"TI match ({self.feed_name}): known malicious domain '{domain}' observed."
+                    f"TI match ({self.feed_name}): known malicious domain '{matched_bad}' observed."
                 )
 
         alert.iocs = enriched

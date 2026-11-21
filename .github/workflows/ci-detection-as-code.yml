@@ -56,7 +56,10 @@ jobs:
         run: pytest --cov=detection_engine --cov=simulator --cov-report=term-missing
 
       - name: Run end-to-end Purple Team lab simulation
-        run: dac-lab run-lab --scenario all --output-dir lab_output
+        run: |
+          dac-lab run-lab --scenario all --output-dir lab_output
+          dac-lab export-attack-layer --output lab_output/attack_layer.json
+          dac-lab export-siem --target all --output-dir lab_output/siem_queries
 
   trivy-fs-scan:
     name: Secrets, Misconfig & Dependency Scan (Trivy)

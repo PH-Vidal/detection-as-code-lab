@@ -37,7 +37,7 @@ def _make_event(
 class TestSigmaRuleSuite(unittest.TestCase):
     def test_all_rules_pass_schema_validation(self) -> None:
         rules = load_rules_from_dir(RULES_DIR)
-        self.assertEqual(len(rules), 8)
+        self.assertEqual(len(rules), 11)
         rule_ids = [r.id for r in rules]
         self.assertEqual(len(rule_ids), len(set(rule_ids)), "Duplicate Sigma rule IDs detected")
         for rule in rules:
@@ -265,6 +265,107 @@ class TestSigmaRuleSuite(unittest.TestCase):
                     "user.name": "ansible_provisioner",
                 },
             )
+        ]
+        self.assertEqual(engine.evaluate(tn), [])
+
+    def test_aws_iam_privilege_escalation_tp_and_tn(self) -> None:
+        rule = load_rule_from_file(RULES_DIR / "aws_iam_privilege_escalation.yml")
+        engine = SigmaDetectionEngine([rule])
+
+        tp = [
+            _make_event(
+                logsource={"product": "aws", "service": "cloudtrail"},
+                fields={
+                    "event.action": "AttachUserPolicy",
+                    "user.name": "compromised-dev",
+                    "source.ip": "192.0.2.55",
+                    "aws.cloudtrail.request_parameters": (
+                        '{"policyArn": "arn:aws:iam::aws:policy/AdministratorAccess"}'
+                    ),
+                },
+            )
+        ]
+        self.assertEqual(len(engine.evaluate(tp)), 1)
+
+        # True Negative: terraform-ci automation excluded by filter_iac_automation
+        tn = [
+            _make_event(
+                logsource={"product": "aws", "service": "cloudtrail"},
+                fields={
+                    "event.action": "AttachUserPolicy",
+                    "user.name": "terraform-ci",
+                    "source.ip": "10.0.2.60",
+                    "aws.cloudtrail.request_parameters": (
+                        '{"policyArn": "arn:aws:iam::aws:policy/PowerUserAccess"}'
+                    ),
+                },
+            )
+        ]
+        self.assertEqual(engine.evaluate(tn), [])
+
+    def test_aws_cloudtrail_tampering_tp_and_tn(self) -> None:
+        rule = load_rule_from_file(RULES_DIR / "aws_cloudtrail_tampering.yml")
+        engine = SigmaDetectionEngine([rule])
+
+        tp = [
+            _make_event(
+                logsource={"product": "aws", "service": "cloudtrail"},
+                fields={
+                    "cloud.service.name": "cloudtrail.amazonaws.com",
+                    "event.action": "StopLogging",
+                    "user.name": "compromised-dev",
+                    "source.ip": "192.0.2.55",
+                },
+            )
+        ]
+        alerts = engine.evaluate(tp)
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0].severity, "critical")
+
+        # True Negative: secops-breakglass excluded by filter_secops_breakglass
+        tn = [
+            _make_event(
+                logsource={"product": "aws", "service": "cloudtrail"},
+                fields={
+                    "cloud.service.name": "cloudtrail.amazonaws.com",
+                    "event.action": "UpdateTrail",
+                    "user.name": "secops-breakglass",
+                    "aws.cloudtrail.request_parameters": '{"isMultiRegionTrail": false}',
+                },
+            )
+        ]
+        self.assertEqual(engine.evaluate(tn), [])
+
+    def test_dns_tunneling_exfiltration_tp_and_tn(self) -> None:
+        rule = load_rule_from_file(RULES_DIR / "dns_tunneling_exfiltration.yml")
+        engine = SigmaDetectionEngine([rule])
+
+        tp = [
+            _make_event(
+                logsource={"category": "dns"},
+                fields={
+                    "source.ip": "198.51.100.77",
+                    "dns.question.type": "TXT",
+                    "dns.question.name": f"abcdef0123456789abcdef012345{i}.exfil.tunnel-lab.example",
+                },
+                offset_seconds=i * 10,
+            )
+            for i in range(4)
+        ]
+        self.assertEqual(len(engine.evaluate(tp)), 1)
+
+        # True Negative: legitimate DKIM lookups excluded by filter_legit_dns
+        tn = [
+            _make_event(
+                logsource={"category": "dns"},
+                fields={
+                    "source.ip": "10.0.2.30",
+                    "dns.question.type": "TXT",
+                    "dns.question.name": f"selector20261120longkeyhash00{i}._domainkey.corp.example",
+                },
+                offset_seconds=i * 5,
+            )
+            for i in range(5)
         ]
         self.assertEqual(engine.evaluate(tn), [])
 

@@ -1,0 +1,34 @@
+title: AWS CloudTrail Audit Logging Tampering or Disruption
+id: 1a2b3c4d-4002-4d02-9e02-000000000010
+status: stable
+description: Detects attempts to impair AWS CloudTrail audit visibility via StopLogging, DeleteTrail, or disabling multi-region logging via UpdateTrail.
+author: Pedro Henrique Vidal (PH-Vidal)
+date: 2026-11-20
+references:
+  - https://attack.mitre.org/techniques/T1562/008/
+tags:
+  - attack.defense_evasion
+  - attack.t1562.008
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection_stop_delete:
+    cloud.service.name: cloudtrail.amazonaws.com
+    event.action:
+      - StopLogging
+      - DeleteTrail
+  selection_weaken_trail:
+    cloud.service.name: cloudtrail.amazonaws.com
+    event.action: UpdateTrail
+    aws.cloudtrail.request_parameters|contains:
+      - '"isMultiRegionTrail": false'
+      - '"includeGlobalServiceEvents": false'
+  filter_secops_breakglass:
+    user.name:
+      - secops-breakglass
+  condition: (selection_stop_delete or selection_weaken_trail) and not filter_secops_breakglass
+falsepositives:
+  - Planned decommissioning of legacy CloudTrail trails by Security Operations
+level: critical
+playbook_id: PB-008

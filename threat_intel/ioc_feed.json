@@ -1,7 +1,7 @@
 {
   "feed_name": "local-soc-ti-feed",
-  "version": "1.0.0",
-  "description": "Local Threat Intelligence IOC feed using RFC 5737 test IP ranges for safe lab correlation.",
+  "version": "2.0.0",
+  "description": "Local Threat Intelligence IOC feed using RFC 5737 test IP ranges and RFC 2606 example domains for safe lab correlation.",
   "malicious_ips": {
     "198.51.100.77": {
       "category": "ssh_bruteforce_botnet",
@@ -23,6 +23,13 @@
       "threat_actor": "SIM-TA-03 (Linux Post-Exploitation C2)",
       "first_seen": "2026-11-10",
       "tags": ["c2", "reverse-shell", "persistence"]
+    },
+    "192.0.2.55": {
+      "category": "cloud_iam_abuser",
+      "confidence": "high",
+      "threat_actor": "SIM-TA-04 (Cloud IAM Credential Abuse)",
+      "first_seen": "2026-11-15",
+      "tags": ["cloud", "iam-privesc", "defense-evasion"]
     }
   },
   "suspicious_users": [
@@ -32,6 +39,7 @@
   ],
   "suspicious_domains": [
     "c2.malicious-lab.example",
+    "exfil.tunnel-lab.example",
     "dropper.invalid"
   ]
 }

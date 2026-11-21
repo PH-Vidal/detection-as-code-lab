@@ -10,6 +10,9 @@ Actionable triage, containment, eradication, and recovery runbooks mapped direct
 | **PB-004** | `linux_reverse_shell.yml` | `T1059.004` | Critical |
 | **PB-005** | `linux_credential_access.yml` | `T1003.008`, `T1552.004` | High |
 | **PB-006** | `linux_backdoor_user.yml` | `T1136.001`, `T1548.003` | High |
+| **PB-007** | `aws_iam_privilege_escalation.yml` | `T1098.001`, `T1098.003` | High |
+| **PB-008** | `aws_cloudtrail_tampering.yml` | `T1562.008` | Critical |
+| **PB-009** | `dns_tunneling_exfiltration.yml` | `T1071.004`, `T1048.003` | High |
 
 ---
 
@@ -89,3 +92,40 @@ Actionable triage, containment, eradication, and recovery runbooks mapped direct
 - **Containment & Eradication:**
   1. Lock and remove unauthorized persistence accounts (`usermod -L` then `userdel -r` after forensic capture).
   2. Revert unauthorized `sudoers` edits and audit for secondary persistence mechanisms (`cron`, `systemd`, `authorized_keys`).
+
+---
+
+## PB-007 — AWS IAM Privilege Escalation / Unauthorized Access Key Creation
+- **MITRE ATT&CK:** `T1098.001` (Additional Cloud Credentials), `T1098.003` (Additional Cloud Roles)
+- **Triage:**
+  1. Verify `user.name`, `source.ip`, `user_agent.original`, and `aws.cloudtrail.policy_arn` / `aws.cloudtrail.target_user` against approved IaC/Terraform change tickets.
+  2. Check for follow-on API calls (`CreateUser`, `AssumeRole`, `GetSecretValue`, `ListBuckets`, `StopLogging`) from the same `source.ip` or IAM principal.
+- **Containment:**
+  1. Immediately deactivate and delete unauthorized IAM access keys (`aws iam update-access-key --status Inactive`) and attach an explicit `DenyAll` inline policy to the compromised principal.
+  2. Detach unauthorized administrative policies (`AdministratorAccess`, `IAMFullAccess`) and revoke active STS sessions.
+- **Eradication & Hardening:**
+  1. Enforce least privilege, SCP guardrails, and mandatory MFA for IAM policy mutations.
+  2. Restrict IAM changes exclusively to CI/CD OIDC roles with pull-request review.
+
+---
+
+## PB-008 — AWS CloudTrail Audit Logging Tampering or Disruption
+- **MITRE ATT&CK:** `T1562.008` (Impair Defenses: Disable or Modify Cloud Logs)
+- **Triage (Immediate — Critical Severity):**
+  1. Confirm whether an authorized Security Operations break-glass ticket exists for `StopLogging`, `DeleteTrail`, or `UpdateTrail`.
+  2. Pivot immediately to the caller's IAM identity and `source.ip` across GuardDuty, VPC Flow Logs, and S3 access logs to identify parallel actions hidden after logging stopped.
+- **Containment & Recovery:**
+  1. Re-enable CloudTrail logging immediately (`aws cloudtrail start-logging --name <trail>`) and restore multi-region + global event coverage.
+  2. Quarantine the acting IAM principal and enforce an AWS Organizations Service Control Policy (SCP) denying `cloudtrail:StopLogging` and `cloudtrail:DeleteTrail` for non-security roles.
+
+---
+
+## PB-009 — Suspected DNS Tunneling / C2 Data Exfiltration
+- **MITRE ATT&CK:** `T1071.004` (Application Layer Protocol: DNS), `T1048.003` (Exfiltration Over Alternative Protocol)
+- **Triage:**
+  1. Inspect queried base domain, subdomain entropy/length, query type (`TXT`/`A`/`CNAME`), and query cadence from `source.ip`.
+  2. Decode hex/base32/base64 subdomain labels in a safe offline environment to estimate scope of exfiltrated data.
+  3. Cross-reference `source.ip` with host telemetry (`sshd`, `linux_audit`) to identify the originating process or compromised account.
+- **Containment & Hardening:**
+  1. Sinkhole the parent malicious domain at internal DNS resolvers / Route 53 DNS Firewall and block direct outbound UDP/TCP port 53 from application subnets.
+  2. Isolate the source host and rotate any secrets or credentials potentially exfiltrated over the covert channel.

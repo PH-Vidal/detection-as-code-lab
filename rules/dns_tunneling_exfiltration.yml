@@ -1,0 +1,37 @@
+title: Suspected DNS Tunneling or C2 Data Exfiltration Burst
+id: 1a2b3c4d-5001-4e01-9f01-000000000011
+status: stable
+description: Detects repeated DNS queries with unusually long encoded subdomains (commonly used for DNS tunneling C2 beacons or staged data exfiltration) from the same source IP within 5 minutes.
+author: Pedro Henrique Vidal (PH-Vidal)
+date: 2026-11-20
+references:
+  - https://attack.mitre.org/techniques/T1071/004/
+  - https://attack.mitre.org/techniques/T1048/003/
+tags:
+  - attack.command_and_control
+  - attack.exfiltration
+  - attack.t1071.004
+  - attack.t1048.003
+logsource:
+  category: dns
+detection:
+  selection_long_label:
+    dns.question.type:
+      - TXT
+      - A
+      - AAAA
+      - CNAME
+    dns.question.name|re:
+      - "^[a-z0-9_-]{24,}\\."
+  filter_legit_dns:
+    dns.question.name|contains:
+      - "_domainkey"
+      - "_dmarc"
+      - "in-addr.arpa"
+      - "amazonaws.com"
+  timeframe: 5m
+  condition: selection_long_label and not filter_legit_dns | count() by source.ip >= 4
+falsepositives:
+  - Legitimate DKIM/DMARC verification lookups or CDN/cloud anti-spam DNSBL queries
+level: high
+playbook_id: PB-009

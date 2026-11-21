@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import math
 import re
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -41,6 +43,15 @@ def _parse_iso_timestamp(value: str) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=UTC)
     return dt.astimezone(UTC)
+
+
+def _shannon_entropy(text: str) -> float:
+    if not text:
+        return 0.0
+    counts = Counter(text)
+    length = len(text)
+    entropy = -sum((cnt / length) * math.log2(cnt / length) for cnt in counts.values())
+    return round(entropy, 3)
 
 
 def parse_ssh_line(
@@ -178,6 +189,121 @@ def parse_linux_audit_line(
     )
 
 
+def parse_cloudtrail_line(
+    line: str,
+    *,
+    line_number: int = 0,
+    source_file: str = "",
+) -> NormalizedEvent | None:
+    """Normalize an AWS CloudTrail JSONL telemetry event."""
+    stripped = line.strip()
+    if not stripped.startswith("{"):
+        return None
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict) or "eventName" not in payload or "eventSource" not in payload:
+        return None
+
+    ts_raw = str(payload.get("eventTime") or payload.get("timestamp") or "")
+    timestamp = _parse_iso_timestamp(ts_raw) if ts_raw else datetime.now(UTC)
+
+    identity = payload.get("userIdentity")
+    user_name = ""
+    if isinstance(identity, dict):
+        user_name = str(identity.get("userName") or "")
+        if not user_name and identity.get("arn"):
+            user_name = str(identity["arn"]).split("/")[-1]
+    elif payload.get("user"):
+        user_name = str(payload["user"])
+
+    req_params = payload.get("requestParameters")
+    req_dict = req_params if isinstance(req_params, dict) else {}
+    error_code = str(payload.get("errorCode") or "")
+    event_source = str(payload.get("eventSource", ""))
+
+    fields: dict[str, Any] = {
+        "event.category": "iam" if "iam" in event_source.lower() else "configuration",
+        "event.action": str(payload.get("eventName", "")),
+        "event.outcome": "failure" if error_code else "success",
+        "cloud.provider": "aws",
+        "cloud.region": str(payload.get("awsRegion", "us-east-1")),
+        "cloud.service.name": event_source,
+        "source.ip": str(payload.get("sourceIPAddress", "")),
+        "user.name": user_name or "unknown",
+        "user_agent.original": str(payload.get("userAgent", "")),
+        "aws.cloudtrail.error_code": error_code,
+        "aws.cloudtrail.policy_arn": str(req_dict.get("policyArn", "")),
+        "aws.cloudtrail.target_user": str(req_dict.get("userName", "")),
+        "aws.cloudtrail.group_name": str(req_dict.get("groupName", "")),
+        "aws.cloudtrail.trail_name": str(req_dict.get("name", "")),
+        "aws.cloudtrail.request_parameters": json.dumps(req_dict, sort_keys=True),
+    }
+
+    return NormalizedEvent(
+        timestamp=timestamp,
+        source_type="aws_cloudtrail",
+        logsource={"product": "aws", "service": "cloudtrail"},
+        fields=fields,
+        raw=stripped,
+        line_number=line_number,
+        source_file=source_file,
+    )
+
+
+def parse_dns_line(
+    line: str,
+    *,
+    line_number: int = 0,
+    source_file: str = "",
+) -> NormalizedEvent | None:
+    """Normalize a DNS query JSONL telemetry event with subdomain length and entropy."""
+    stripped = line.strip()
+    if not stripped.startswith("{"):
+        return None
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    qname = payload.get("query") or payload.get("qname") or payload.get("dns_query")
+    if not qname:
+        return None
+
+    query_str = str(qname).strip().rstrip(".").lower()
+    leftmost_label = query_str.split(".")[0] if query_str else ""
+    ts_raw = str(payload.get("timestamp", ""))
+    timestamp = _parse_iso_timestamp(ts_raw) if ts_raw else datetime.now(UTC)
+
+    fields: dict[str, Any] = {
+        "event.category": "network",
+        "event.action": "dns_query",
+        "event.outcome": "success",
+        "host.name": str(payload.get("host", "dns-resolver-01")),
+        "source.ip": str(payload.get("source_ip") or payload.get("client_ip") or ""),
+        "user.name": str(payload.get("user", "")),
+        "dns.question.name": query_str,
+        "dns.question.type": str(payload.get("qtype") or payload.get("query_type") or "A").upper(),
+        "dns.response.code": str(payload.get("rcode", "NOERROR")).upper(),
+        "dns.question.subdomain": leftmost_label,
+        "dns.question.length": len(query_str),
+        "dns.question.entropy": _shannon_entropy(leftmost_label),
+    }
+
+    return NormalizedEvent(
+        timestamp=timestamp,
+        source_type="dns",
+        logsource={"category": "dns"},
+        fields=fields,
+        raw=stripped,
+        line_number=line_number,
+        source_file=source_file,
+    )
+
+
 def parse_log_line(
     line: str,
     *,
@@ -197,10 +323,18 @@ def parse_log_line(
         return parse_web_line(stripped, line_number=line_number, source_file=source_file)
     if log_type == "linux_audit":
         return parse_linux_audit_line(stripped, line_number=line_number, source_file=source_file)
+    if log_type == "aws_cloudtrail":
+        return parse_cloudtrail_line(stripped, line_number=line_number, source_file=source_file)
+    if log_type == "dns":
+        return parse_dns_line(stripped, line_number=line_number, source_file=source_file)
 
-    # Auto-detection order: JSON audit -> Web access -> SSH syslog
+    # Auto-detection order: JSON (CloudTrail -> DNS -> Linux Audit) -> Web access -> SSH syslog
     if stripped.startswith("{"):
-        return parse_linux_audit_line(stripped, line_number=line_number, source_file=source_file)
+        for parser in (parse_cloudtrail_line, parse_dns_line, parse_linux_audit_line):
+            evt = parser(stripped, line_number=line_number, source_file=source_file)
+            if evt is not None:
+                return evt
+        return None
     web_evt = parse_web_line(stripped, line_number=line_number, source_file=source_file)
     if web_evt is not None:
         return web_evt
