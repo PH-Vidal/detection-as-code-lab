@@ -19,7 +19,7 @@ COPY simulator/ ./simulator/
 COPY rules/ ./rules/
 COPY threat_intel/ ./threat_intel/
 
-RUN pip install --no-cache-dir --upgrade pip \
+RUN pip install --no-cache-dir --upgrade pip "setuptools>=78.1.1" \
     && pip install --no-cache-dir ".[yaml]" \
     && mkdir -p /app/lab_output \
     && chown -R 10001:10001 /app
