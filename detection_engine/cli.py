@@ -30,8 +30,21 @@ from detection_engine.sigma_engine import (
 from simulator.attack_simulator import SCENARIOS, generate_lab_logs
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_RULES_DIR = PROJECT_ROOT / "rules"
-DEFAULT_TI_FEED = PROJECT_ROOT / "threat_intel" / "ioc_feed.json"
+
+
+def _resolve_default_path(relative: str) -> Path:
+    """Resolve repo-relative data paths for both editable installs and site-packages installs."""
+    pkg_candidate = PROJECT_ROOT / relative
+    if pkg_candidate.exists():
+        return pkg_candidate
+    cwd_candidate = Path.cwd() / relative
+    if cwd_candidate.exists():
+        return cwd_candidate
+    return pkg_candidate
+
+
+DEFAULT_RULES_DIR = _resolve_default_path("rules")
+DEFAULT_TI_FEED = _resolve_default_path("threat_intel/ioc_feed.json")
 
 
 def _cmd_validate_rules(args: argparse.Namespace) -> int:
@@ -186,9 +199,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    default_rules = str(_resolve_default_path("rules"))
+    default_ti_feed = str(_resolve_default_path("threat_intel/ioc_feed.json"))
+
     # validate-rules
     p_val = sub.add_parser("validate-rules", help="Validate all Sigma YAML rules in a directory.")
-    p_val.add_argument("--rules", default=str(DEFAULT_RULES_DIR), help="Path to Sigma rules directory.")
+    p_val.add_argument("--rules", default=default_rules, help="Path to Sigma rules directory.")
     p_val.set_defaults(func=_cmd_validate_rules)
 
     # simulate
@@ -206,8 +222,8 @@ def build_parser() -> argparse.ArgumentParser:
     # detect
     p_det = sub.add_parser("detect", help="Run Sigma rules, kill-chain correlation, and IOC enrichment.")
     p_det.add_argument("--logs", nargs="+", required=True, help="Log files or directories to inspect.")
-    p_det.add_argument("--rules", default=str(DEFAULT_RULES_DIR), help="Path to Sigma rules directory.")
-    p_det.add_argument("--ti-feed", default=str(DEFAULT_TI_FEED), help="Path to Threat Intel JSON feed.")
+    p_det.add_argument("--rules", default=default_rules, help="Path to Sigma rules directory.")
+    p_det.add_argument("--ti-feed", default=default_ti_feed, help="Path to Threat Intel JSON feed.")
     p_det.add_argument(
         "--log-type",
         choices=["auto", "sshd", "webserver", "linux_audit", "aws_cloudtrail", "dns"],
@@ -235,8 +251,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_lab.add_argument("--scenario", choices=["all", *SCENARIOS], default="all")
     p_lab.add_argument("--output-dir", default="lab_output", help="Directory for logs and reports.")
-    p_lab.add_argument("--rules", default=str(DEFAULT_RULES_DIR), help="Path to Sigma rules directory.")
-    p_lab.add_argument("--ti-feed", default=str(DEFAULT_TI_FEED), help="Path to Threat Intel JSON feed.")
+    p_lab.add_argument("--rules", default=default_rules, help="Path to Sigma rules directory.")
+    p_lab.add_argument("--ti-feed", default=default_ti_feed, help="Path to Threat Intel JSON feed.")
     p_lab.add_argument("--discord-webhook", help="Optional Discord Webhook URL.")
     p_lab.set_defaults(func=_cmd_run_lab)
 
@@ -246,7 +262,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Export MITRE ATT&CK Navigator v4.5 coverage layer JSON from Sigma rules.",
     )
     p_mitre.add_argument(
-        "--rules", default=str(DEFAULT_RULES_DIR), help="Path to Sigma rules directory."
+        "--rules", default=default_rules, help="Path to Sigma rules directory."
     )
     p_mitre.add_argument(
         "--output",
@@ -266,7 +282,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="all",
         help="Target SIEM query language.",
     )
-    p_siem.add_argument("--rules", default=str(DEFAULT_RULES_DIR), help="Path to Sigma rules directory.")
+    p_siem.add_argument("--rules", default=default_rules, help="Path to Sigma rules directory.")
     p_siem.add_argument(
         "--output-dir",
         default="lab_output/siem_queries",
